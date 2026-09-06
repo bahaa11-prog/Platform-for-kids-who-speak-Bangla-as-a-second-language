@@ -6,9 +6,16 @@ import type { Language } from "../../lib/use-language";
 
 type Mode = "sign-in" | "sign-up" | "recover";
 
-export default function AuthCard({ returnTo, language = "en" }: { returnTo: string; language?: Language }) {
+export default function AuthCard({
+  returnTo,
+  language = "en",
+}: {
+  returnTo: string;
+  language?: Language;
+}) {
   const router = useRouter();
   const s = (en: string, bn: string) => (language === "bn" ? bn : en);
+
   const [mode, setMode] = useState<Mode>("sign-in");
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -24,10 +31,92 @@ export default function AuthCard({ returnTo, language = "en" }: { returnTo: stri
     setError(null);
   }
 
+  // Client-side form validation
+  function validateForm(): string | null {
+    const trimmedEmail = email.trim();
+
+    // Email validation
+    if (!trimmedEmail) {
+      return s(
+        "Please enter your email address.",
+        "অনুগ্রহ করে আপনার ইমেইল ঠিকানা দিন।",
+      );
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      return s(
+        "Please enter a valid email address.",
+        "অনুগ্রহ করে একটি বৈধ ইমেইল ঠিকানা দিন।",
+      );
+    }
+
+    // Sign-up validation
+    if (mode === "sign-up") {
+      const trimmedName = displayName.trim();
+
+      if (!trimmedName) {
+        return s(
+          "Please enter your name.",
+          "অনুগ্রহ করে আপনার নাম দিন।",
+        );
+      }
+
+      if (trimmedName.length < 2) {
+        return s(
+          "Your name must be at least 2 characters.",
+          "আপনার নাম কমপক্ষে ২ অক্ষরের হতে হবে।",
+        );
+      }
+    }
+
+    // Recovery code validation
+    if (mode === "recover") {
+      const trimmedRecoveryCode = recoveryCode.trim();
+
+      if (!trimmedRecoveryCode) {
+        return s(
+          "Please enter your recovery code.",
+          "অনুগ্রহ করে আপনার পুনরুদ্ধার কোড দিন।",
+        );
+      }
+    }
+
+    // Password validation
+    if (mode !== "sign-in") {
+      if (!password) {
+        return s(
+          "Please enter a password.",
+          "অনুগ্রহ করে একটি পাসওয়ার্ড দিন।",
+        );
+      }
+
+      if (password.length < 10) {
+        return s(
+          "Your password must be at least 10 characters.",
+          "আপনার পাসওয়ার্ড কমপক্ষে ১০ অক্ষরের হতে হবে।",
+        );
+      }
+    }
+
+    return null;
+  }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    setBusy(true);
+
+    // Clear previous error
     setError(null);
+
+    // Run client-side validation before contacting the server
+    const validationError = validateForm();
+
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    setBusy(true);
+
     try {
       const endpoint =
         mode === "sign-in"
@@ -35,34 +124,64 @@ export default function AuthCard({ returnTo, language = "en" }: { returnTo: stri
           : mode === "sign-up"
             ? "/api/auth/sign-up"
             : "/api/auth/recover";
+
       const payload =
         mode === "sign-in"
-          ? { email, password }
+          ? {
+              email: email.trim(),
+              password,
+            }
           : mode === "sign-up"
-            ? { email, password, displayName }
-            : { email, recoveryCode, newPassword: password };
+            ? {
+                email: email.trim(),
+                password,
+                displayName: displayName.trim(),
+              }
+            : {
+                email: email.trim(),
+                recoveryCode: recoveryCode.trim(),
+                newPassword: password,
+              };
+
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(payload),
       });
+
       const data = (await response.json().catch(() => ({}))) as {
         error?: string;
         recoveryCodes?: string[];
       };
+
       if (!response.ok) {
-        setError(data.error ?? s("Something went wrong. Please try again.", "কিছু একটা সমস্যা হয়েছে। আবার চেষ্টা করুন।"));
+        setError(
+          data.error ??
+            s(
+              "Something went wrong. Please try again.",
+              "কিছু একটা সমস্যা হয়েছে। আবার চেষ্টা করুন।",
+            ),
+        );
         return;
       }
+
       if (mode === "sign-up" && data.recoveryCodes?.length) {
         // Show the one-time recovery codes before leaving the page.
         setIssuedCodes(data.recoveryCodes);
         return;
       }
+
       router.push(returnTo);
       router.refresh();
     } catch {
-      setError(s("Could not reach the server. Check your connection and try again.", "সার্ভারে পৌঁছানো যায়নি। সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।"));
+      setError(
+        s(
+          "Could not reach the server. Check your connection and try again.",
+          "সার্ভারে পৌঁছানো যায়নি। সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।",
+        ),
+      );
     } finally {
       setBusy(false);
     }
@@ -70,6 +189,7 @@ export default function AuthCard({ returnTo, language = "en" }: { returnTo: stri
 
   async function copyCodes() {
     if (!issuedCodes) return;
+
     try {
       await navigator.clipboard.writeText(issuedCodes.join("\n"));
       setCodesCopied(true);
@@ -81,24 +201,42 @@ export default function AuthCard({ returnTo, language = "en" }: { returnTo: stri
   if (issuedCodes) {
     return (
       <section className="auth-card" aria-label="Recovery codes">
-        <h2 className="auth-codes-title">{s("Save your recovery codes", "আপনার পুনরুদ্ধার কোড সংরক্ষণ করুন")}</h2>
+        <h2 className="auth-codes-title">
+          {s(
+            "Save your recovery codes",
+            "আপনার পুনরুদ্ধার কোড সংরক্ষণ করুন",
+          )}
+        </h2>
+
         <p className="auth-note">
           {s(
             "There is no email reset on this platform. If you forget your password, one of these one-time codes is the only way back into your account. Store them somewhere safe — they are shown only once.",
             "এই প্ল্যাটফর্মে ইমেইলে রিসেট নেই। পাসওয়ার্ড ভুলে গেলে এই এককালীন কোডগুলোর একটিই অ্যাকাউন্টে ফেরার একমাত্র উপায়। নিরাপদ জায়গায় রাখুন — এগুলো কেবল একবারই দেখানো হয়।",
           )}
         </p>
-        <ul className="auth-codes" aria-label="One-time recovery codes">
+
+        <ul
+          className="auth-codes"
+          aria-label="One-time recovery codes"
+        >
           {issuedCodes.map((code) => (
             <li key={code}>
               <code>{code}</code>
             </li>
           ))}
         </ul>
+
         <div className="auth-codes-actions">
-          <button type="button" className="outline-button" onClick={() => void copyCodes()}>
-            {codesCopied ? s("Copied ✓", "কপি হয়েছে ✓") : s("Copy all codes", "সব কোড কপি করুন")}
+          <button
+            type="button"
+            className="outline-button"
+            onClick={() => void copyCodes()}
+          >
+            {codesCopied
+              ? s("Copied ✓", "কপি হয়েছে ✓")
+              : s("Copy all codes", "সব কোড কপি করুন")}
           </button>
+
           <button
             type="button"
             className="auth-submit"
@@ -107,7 +245,10 @@ export default function AuthCard({ returnTo, language = "en" }: { returnTo: stri
               router.refresh();
             }}
           >
-            {s("I’ve saved them — continue", "সংরক্ষণ করেছি — এগিয়ে যান")}
+            {s(
+              "I’ve saved them — continue",
+              "সংরক্ষণ করেছি — এগিয়ে যান",
+            )}
           </button>
         </div>
       </section>
@@ -116,7 +257,11 @@ export default function AuthCard({ returnTo, language = "en" }: { returnTo: stri
 
   return (
     <section className="auth-card" aria-label="Grown-up account">
-      <div className="auth-tabs" role="tablist" aria-label="Sign in or create account">
+      <div
+        className="auth-tabs"
+        role="tablist"
+        aria-label="Sign in or create account"
+      >
         <button
           type="button"
           role="tab"
@@ -126,6 +271,7 @@ export default function AuthCard({ returnTo, language = "en" }: { returnTo: stri
         >
           {s("Sign in", "সাইন ইন")}
         </button>
+
         <button
           type="button"
           role="tab"
@@ -146,38 +292,59 @@ export default function AuthCard({ returnTo, language = "en" }: { returnTo: stri
         </p>
       )}
 
-      <form onSubmit={submit}>
+      <form onSubmit={submit} noValidate>
         {mode === "sign-up" && (
           <label>
-            {s("Your name (shown to learners)", "আপনার নাম (শিক্ষার্থীরা দেখবে)")}
+            {s(
+              "Your name (shown to learners)",
+              "আপনার নাম (শিক্ষার্থীরা দেখবে)",
+            )}
+
             <input
               type="text"
               value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
+              onChange={(event) => {
+                setDisplayName(event.target.value);
+                setError(null);
+              }}
               maxLength={60}
               required
               autoComplete="name"
+              aria-invalid={
+                mode === "sign-up" && !!error ? true : undefined
+              }
             />
           </label>
         )}
+
         <label>
           {s("Email", "ইমেইল")}
+
           <input
             type="email"
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={(event) => {
+              setEmail(event.target.value);
+              setError(null);
+            }}
             maxLength={120}
             required
             autoComplete="email"
+            aria-invalid={!!error ? true : undefined}
           />
         </label>
+
         {mode === "recover" && (
           <label>
             {s("Recovery code", "পুনরুদ্ধার কোড")}
+
             <input
               type="text"
               value={recoveryCode}
-              onChange={(event) => setRecoveryCode(event.target.value)}
+              onChange={(event) => {
+                setRecoveryCode(event.target.value);
+                setError(null);
+              }}
               maxLength={20}
               required
               placeholder="XXXXX-XXXXX"
@@ -185,24 +352,51 @@ export default function AuthCard({ returnTo, language = "en" }: { returnTo: stri
             />
           </label>
         )}
+
         <label>
-          {mode === "sign-in" ? s("Password", "পাসওয়ার্ড") : mode === "sign-up" ? s("Password", "পাসওয়ার্ড") : s("New password", "নতুন পাসওয়ার্ড")}{" "}
-          {mode !== "sign-in" && <small>{s("(at least 10 characters)", "(কমপক্ষে ১০ অক্ষর)")}</small>}
+          {mode === "sign-in"
+            ? s("Password", "পাসওয়ার্ড")
+            : mode === "sign-up"
+              ? s("Password", "পাসওয়ার্ড")
+              : s("New password", "নতুন পাসওয়ার্ড")}{" "}
+
+          {mode !== "sign-in" && (
+            <small>
+              {s(
+                "(at least 10 characters)",
+                "(কমপক্ষে ১০ অক্ষর)",
+              )}
+            </small>
+          )}
+
           <input
             type="password"
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(event) => {
+              setPassword(event.target.value);
+              setError(null);
+            }}
             minLength={mode === "sign-in" ? undefined : 10}
             required
-            autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
+            autoComplete={
+              mode === "sign-in"
+                ? "current-password"
+                : "new-password"
+            }
           />
         </label>
+
         {error && (
           <p className="auth-error" role="alert">
             {error}
           </p>
         )}
-        <button type="submit" className="auth-submit" disabled={busy}>
+
+        <button
+          type="submit"
+          className="auth-submit"
+          disabled={busy}
+        >
           {busy
             ? s("One moment…", "একটু অপেক্ষা…")
             : mode === "sign-in"
@@ -214,12 +408,24 @@ export default function AuthCard({ returnTo, language = "en" }: { returnTo: stri
       </form>
 
       {mode === "sign-in" && (
-        <button type="button" className="auth-link" onClick={() => switchMode("recover")}>
-          {s("Forgot your password? Use a recovery code", "পাসওয়ার্ড ভুলে গেছেন? পুনরুদ্ধার কোড ব্যবহার করুন")}
+        <button
+          type="button"
+          className="auth-link"
+          onClick={() => switchMode("recover")}
+        >
+          {s(
+            "Forgot your password? Use a recovery code",
+            "পাসওয়ার্ড ভুলে গেছেন? পুনরুদ্ধার কোড ব্যবহার করুন",
+          )}
         </button>
       )}
+
       {mode === "recover" && (
-        <button type="button" className="auth-link" onClick={() => switchMode("sign-in")}>
+        <button
+          type="button"
+          className="auth-link"
+          onClick={() => switchMode("sign-in")}
+        >
           {s("Back to sign in", "সাইন ইনে ফিরে যান")}
         </button>
       )}
